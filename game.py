@@ -1,32 +1,55 @@
 import screepsapi
 import logging
 import configparser
-import sched, time
-from GameObjects import Creep, Source, Spawn, Flag
+import sched
+import time
+import pickle
+import os
+import numpy as np
+from game_objects import Creep, Source, Spawn, Flag
+from map import Room
+from screeps_utilities import room_js_row_col
+
 
 class Game:
 
     def __init__(self):
 
+        # setup logging
+        logging.basicConfig(filename='./logs/screepy.log', format='%(asctime)s\(%(levelname)s\): %(message)s',
+                            level=logging.DEBUG)
+
         # get username and password from safe file
         config = configparser.ConfigParser()
         config.read('screepy.config')
 
-        # assign arguments
+        # server data
         self.user = config['DEFAULT']['user']
         self.password = config['DEFAULT']['password']
-        self.host = config['DEFAULT']['password'] if 'host' in config['DEFAULT'] else None
+        self.host = config['DEFAULT']['host'] if 'host' in config['DEFAULT'] else None
+        self.host_string = self.host if self.host is not None else 'public'
+        self.shard = config['DEFAULT']['shard']
+
+        # program constraints
         self.seconds_per_cycle = config['DEFAULT']['seconds_per_cycle']
         self.frozen_ticks = config['DEFAULT']['frozen_ticks']
         self.future_ticks = config['DEFAULT']['future_ticks']
-        self.shard = 'shard3'  # hardcode for now, probably put in config but need to see how localhost works
+
+        # world data (W60N60 to E60S60 for shard3)
+        self.top_left_room_js_row_col = room_js_row_col(config['DEFAULT']['top_left_room'].strip())
+        self.bottom_right_room_js_row_col = room_js_row_col(config['DEFAULT']['bottom_right_room'].strip())
 
         # init connection to screeps api
         self.api = None
         self.connect()
 
-        # init game map (whole thing?)
-        #self.terrain_map = Map();
+        # terrain
+        self.terrain_string_cache = {}
+        self.terrain_string_pickle_path = 'data/terrain_string_cache.pickle'
+        if os.path.exists(self.terrain_string_pickle_path):
+            with open(self.terrain_string_pickle_path, 'rb') as handle:
+                self.terrain_string_cache = pickle.load(handle)
+        self.init_terrain_map()
 
         # init game objects
         self.snapshot_tick = 0
@@ -34,11 +57,9 @@ class Game:
         self.tasks = {}
         self.unknown_id_count = 0
 
-        # setup logging
-        logging.basicConfig(filename='./logs/screepy.log', format='%(asctime)s\(%(levelname)s\): %(message)s',
-                            level=logging.DEBUG)
+        self.terrain = None
 
-        # setup scheduler if we wanted to run jobs perioidically
+        # setup scheduler if we wanted to run jobs periodically
         self.scheduler = sched.scheduler(time.time, time.sleep)
 
     def connect(self):
@@ -52,10 +73,68 @@ class Game:
             if self.host is None:
                 logging.info(f'no host was provided so connecting to main servers as {self.user}')
                 self.api = screepsapi.API(u=self.user, p=self.password)
-
             else:
                 logging.info(f'connecting to {self.host} as {self.user}')
                 self.api = screepsapi.API(u=self.user, p=self.password, host=self.host)
+
+    def room(self, *args, **kwargs):
+
+        # manipulate kwargs
+        kwargs['top_left_js_row_col'] = self.top_left_room_js_row_col
+
+        # get fill in game data for this room
+        return Room(*args, **kwargs)
+
+    def update_terrain_map_from_room(self, room):
+
+        # pull terrain string from cache or room
+        terrain_string = ''
+
+        if self.host_string in self.terrain_string_cache:
+            if self.shard in self.terrain_string_cache:
+                if room.js_room_name in self.terrain_string_cache:
+                    terrain_string = self.terrain_string_cache[self.host_string][self.shard][room.js_room_name]
+                    logging.info(f'pulled {room.js_room_name} from cache')
+
+        # retrieve it since we couldn't get it from cache
+        if terrain_string == '':
+            # get terrain string from server
+            terrain_string_req_return = self.api.room_terrain(room=room.js_room_name, shard=self.shard, encoded=True)
+            terrain_string = terrain_string_req_return['terrain'][0]['terrain']
+            self.terrain_string_cache[self.host_string][self.shard][room.js_room_name] = terrain_string
+            logging.info(f'pulled {room.js_room_name} from server')
+
+        # loop through terrain string for weights
+        for terrain_character_index in range(0, len(terrain_string)):
+            terrain_point = room.point_from_terrain_index(terrain_character_index)
+            terrain_character = terrain_string[terrain_character_index]
+            terrain_weight = 255  # wall
+            if terrain_character == '0':  # plain
+                terrain_weight = 2
+            elif terrain_character == '1': # swamp
+                terrain_weight = 10
+            self.terrain[terrain_point.y, terrain_point.x] = terrain_weight
+
+    def init_terrain_map(self):
+
+        # define rows
+        world_rows = abs(self.top_left_room_js_row_col['row'] - self.bottom_right_room_js_row_col['row']) + 1
+        world_cols = abs(self.top_left_room_js_row_col['col'] - self.bottom_right_room_js_row_col['col']) + 1
+
+        # init numpy array
+        self.terrain = np.zeros((world_rows * 50, world_cols * 50), dtype=np.intc)
+
+        # loop through rows
+        for world_row in range(0, world_rows):
+            for world_col in range(0, world_cols):
+                world_room = self.room(row=world_row, col=world_col)
+                self.update_terrain_map_from_room(world_room)
+
+        # save cache
+        with open(self.terrain_string_pickle_path, 'wb') as handle:
+            pickle.dump(self.terrain_string_cache, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+        print(self.terrain)
 
     @property
     def game_objects(self):
@@ -66,7 +145,7 @@ class Game:
         self.__game_objects = game_objects
 
     def empire_objects(self, empire_flag_name):
-        #TODO: filter out empire objects for a given flag
+        # TODO: filter out empire objects for a given flag
         return self.__game_objects
 
     def filter_structures(self, structure_type='all'):
@@ -104,6 +183,7 @@ class Game:
 
         # query screeps for snapshot memory
         raw_memory = self.api.memory('', shard=self.shard)  # assuming json dictionary at this point
+        print(raw_memory)
 
         # grab the current tick
         self.snapshot_tick = int(raw_memory['snapshot']['game_time'])
@@ -122,21 +202,17 @@ class Game:
                     self.objects[game_object.name] = Spawn(snapshot_json=game_object, tick=self.snapshot_tick)
 
         # initalize new tasks (the tasks are what tells us that a firm decision has been made for the creeps activity)
-
         # the tasks are what will tell us if a creep is already filling a job
-        self.tasks = [tick: task for (tick, task) in raw_memory['tasks'].items() if
-                      int(tick) < (self.snapshot_tick + self.frozen_ticks)]
+        #TODO: filter tasks down to the ones from snapshot time to frozen ticks
 
     def execute_cycle(self):
 
         # get snapshot
-
-        self.get_snapshot();
+        self.get_snapshot()
 
         # process jobs (once the creep has a task assigned, it cant be changed)
         # tasks are the criteria that determine if a job has been filled)
         # need to account for uncreated objects so far
-
         # TODO: Enemy SA
 
         # Resource Extraction
@@ -147,24 +223,18 @@ class Game:
         last_tick = self.snapshot_tick + self.future_ticks
 
         while tick <= last_tick:
-
             # Detect game state
-
             # Level 0: Manual Energy Harvest
             energy_game_state = 0  # init at lowest level
-
             # Level 1: Harvest Pod Staffing
             containers = self.filter_structures('container')
             sources = self.filter_structures('source')
 
             # Code to see if theres a container on the closest source
-
-            #if container_on_closest_source:
+            # if container_on_closest_source:
             #    energy_game_state = 1
-
             # Job requirements
-
-            #if energy_game_state == 0:
+            # if energy_game_state == 0:
 
         # Check if the creep who did the task last time was still around, if so use him
         # If he's not there or there wasn't one last time or there wasnt a task for some reason, find the nearest utility creep [WORK,CARRY,MOVE,MOVE]
@@ -172,9 +242,13 @@ class Game:
         # Condition 1:
         # - Find the closest not full one
         # - If its on the energy source, let it harvest
+
         # Utility Planning
+
         # Transport Planning
+
         # Tactical Planning
+
         # Surge Planning
 
     def execute_cycle_with_scheduler(self, next_start_time):

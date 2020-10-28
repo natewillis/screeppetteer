@@ -138,5 +138,6 @@ dmypy.json
 cython_debug/
 
 .idea/
+*.pickle
 *.log
 screepy.config
