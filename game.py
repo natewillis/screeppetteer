@@ -1,5 +1,4 @@
 import screepsapi
-import logging
 import configparser
 import sched
 import time
@@ -7,9 +6,9 @@ import pickle
 import os
 import numpy as np
 from game_objects import Creep, Source, Spawn, Flag
-from map import Room
 from screeps_utilities import room_js_row_col
-
+import logging
+logger = logging.getLogger(__name__)
 
 class Game:
 
@@ -105,7 +104,7 @@ class Game:
             logging.info(f'pulled {room.js_room_name} from server')
 
         # loop through terrain string for weights
-        for terrain_character_index in range(0, len(terrain_string)):
+        for terrain_character_index in range(0, len(terrain_string) ):
             terrain_point = room.point_from_terrain_index(terrain_character_index)
             terrain_character = terrain_string[terrain_character_index]
             terrain_weight = 255  # wall
