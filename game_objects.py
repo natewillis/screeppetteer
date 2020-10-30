@@ -1,6 +1,7 @@
 import uuid
 from world import Point
 import constants
+from screeps_utilities import creep_body_resource_cost
 
 # logging
 import logging
@@ -40,21 +41,44 @@ class GameObject:
         #TODO: get initial location converted
         self.__initial_location = Point(snapshot_json=game_object_json['pos'], world=self.world)
         self.__initial_tick = tick
-        self.__current_tick = self.__initial_tick
         self.__initial_hits = game_object_json['hits'] if 'hits' in game_object_json else None
-        self.__current_hits = self.__initial_hits
 
-    def current_task(self):
-        if self.__current_tick in self.world.tasks:
-            pass
-            # TODO need to fix reference of task by name or id to universal_id
+    @property
+    def tasks(self):
+
+        # init tasks
+        tasks = {}
+
+        # only owned objects can be busy with tasks
+        if self.owner is None:
+            return tasks
+
+        # get player task queue
+        player_tasks = self.player.tasks
+
+        # get all my tasks out
+        for tick in player_tasks:
+            if self.universal_id in player_tasks[tick]:
+                tasks[tick] = player_tasks[tick][self.universal_id]
+
+        # return tasks
+        return tasks
+
+    @property
+    def player(self):
+        players = [player for player in self.world.players if player.player_name == self.owner]
+        if len(players) == 0:
+            return None
+        else:
+            return players[0]
+
+    def add_task(self, task):
+        if task.tick not in self.player.tasks:
+            self.player.tasks[task.tick] = {}
+        self.player.tasks[task.tick][self.universal_id] = task
 
     def reset_properties(self):
-        self.__current_tick = self.__initial_tick
-
-    def propagate_to_tick(self, tick):
-        while self.__current_tick < tick:
-            self.__current_tick += 1
+        pass
 
     def location(self, tick):
         return self.__initial_location
@@ -63,14 +87,8 @@ class GameObject:
     def starting_location(self):
         return self.location(self.snapshot_tick)
 
-    def nice_id(self):
-        if self.name is None:
-            return self.name
-        else:
-            return self.js_id
-
     def __str__(self):
-        return f'{self.specific_type} with id of {self.nice_id()} initialized at tick {self.__initial_tick}'
+        return f'{self.specific_type} with id of {self.universal_id} initialized at tick {self.__initial_tick}'
 
     @property
     def snapshot_tick(self):
@@ -86,6 +104,7 @@ class GameObject:
         elif self.code_type == 'flag':
             return hash(self.name)
 
+    @property
     def universal_id(self):
         if self.code_type == 'structure':
             return f'{self.structure_type}-{self.starting_location.room.js_room_name}-{self.starting_location.room_x}-{self.starting_location.room_y}'
@@ -95,6 +114,26 @@ class GameObject:
             return f'{self.name}'
         elif self.code_type == 'flag':
             return f'{self.name}'
+
+    def busy(self, tick, number_of_ticks=1):
+
+        # init return
+        busy = False
+
+        # only owned objects can be busy with tasks
+        if self.owner is None:
+            return False
+
+        # get task queue
+        tasks = self.tasks
+
+        # loop through period to see if tasks
+        for tick in range(tick, tick+number_of_ticks):
+            if tick in tasks:
+                busy = True
+
+        # return busy
+        return busy
 
 
 class MovingObject(GameObject):
@@ -109,17 +148,21 @@ class Creep(GameObject):
 
 class Store:
 
-    def __init__(self, game_object_json, tick):
-        self.__initial_capacity = game_object_json['capacity'].copy()
+    def __init__(self, game_object_json, tick, world, regen_per_tick=0):
+
+        # store world
+        self.world = world
+
+        # initial store data
+        self.__capacity = game_object_json['capacity'].copy()
         self.__initial_used_capacity = game_object_json['used_capacity']
+        self.regen_per_tick = regen_per_tick
 
         # initial parameters
         self.__initial_tick = tick
 
         # dynamic parameters
-        self.__current_tick = tick
-        self.__current_capacity = self.__initial_capacity.copy()
-        self.__current_used_capacity = self.__initial_used_capacity.copy()
+        self.reservations = {}
 
     def __str__(self):
         return f'source with contents {self.__current_capacity.items()}'
@@ -131,6 +174,52 @@ class Store:
         else:
             return True
 
+    @property
+    def contents(self):
+        contents = self.__initial_used_capacity.copy()
+        for tick in range(self.__initial_tick, self.__current_tick):
+            if tick in self.reservations:
+                for reservation in self.reservations[tick]:
+                    contents[reservation['resource_type']] += reservation['amount']
+            if self.regen_per_tick != 0:
+                for resource_type in contents:
+                    if contents[resource_type] <  self.__capacity[resource_type]:
+                        contents[resource_type] += self.regen_per_tick
+
+        return contents
+
+    def test_reservation(self, tick, test_reservation):
+
+        # initialize good reservation and see if it fails a test
+        good_reservation = True
+
+        # init contents to beginning
+        contents = self.__initial_used_capacity.copy()
+
+        # loop through all ticks
+        for tick in range(self.__initial_tick, tick+1):
+
+            # process reservations
+            if tick in self.reservations:
+                for reservation in self.reservations[tick]:
+                    contents[reservation['resource_type']] += reservation['amount']
+
+            # process new reservation
+            if int(tick) == int(test_reservation['tick']):
+                contents[test_reservation['resource_type']] += test_reservation['amount']
+
+            # regeneration if applicable
+            if self.regen_per_tick != 0:
+                for resource_type in contents:
+                    if contents[resource_type] < self.__capacity[resource_type]:
+                        contents[resource_type] += self.regen_per_tick
+
+            # test for goodness
+            for resource_type in contents:
+                if contents[resource_type] < 0:
+                    good_reservation = False
+
+        return good_reservation
 
 
 class Spawn(GameObject):
@@ -142,6 +231,52 @@ class Spawn(GameObject):
 
     def __str__(self):
         return f'spawn named {self.nice_id()} and store {self._GameObject__store}'
+
+    def spawn_creep(self, body, tick):
+
+        # init spawned bool
+        spawned = True
+
+        # create variables associated with creep spawn
+        reservation = {
+            'amount': creep_body_resource_cost(body) * -1,
+            'tick': tick,
+            'resource_type': 'energy'
+        }
+        number_of_ticks = len(body)
+
+        # check if the spawn is busy
+        if not self.busy(tick=tick, number_of_ticks=number_of_ticks):
+
+            # check if it has enough energy
+            if self.store.test_reservation(reservation):
+
+                # assign reservation for energy
+                if tick not in self.store.reservations:
+                    self.store.reservations[tick] = []
+                self.store.reservations[tick].append(reservation)
+
+                # assign actions for creep creation
+                task = {
+                    {
+                        'received': False,
+                        'tick': tick,
+                        'assigned_to': self.universal_id,
+                        'type': 'spawnCreep',
+                        'desired_return_value': 0,
+                        'details': {
+                            'body': body,
+                            'name': uuid.uuid4().hex
+                        }
+                    }
+                }
+                self.add_task(task)
+
+                # assign wait options for length of build
+                for loop_tick in range(tick+1, tick+len(body))
+
+        # return status
+        return spawned
 
 
 

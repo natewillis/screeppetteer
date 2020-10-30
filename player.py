@@ -48,8 +48,7 @@ class Player:
         for game_object_id, game_object in raw_memory['snapshot']['objects'].items():
             if game_object['code_type'] == 'structure':
                 if game_object['structure_type'] == 'spawn':
-                    self.game_objects[game_object['name']] = Spawn(game_object_json=game_object,
-                                                                   tick=self.snapshot_tick, world=self.world)
+                    self.game_objects[game_object['name']] = Spawn(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
             elif game_object['code_type'] == 'flag':
                 self.game_objects[game_object['name']] = Flag(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
             elif game_object['code_type'] == 'source':

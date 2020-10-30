@@ -1,6 +1,9 @@
 import re
 import screepsapi
 import configparser
+import constants
+
+# logging
 import logging
 logger = logging.getLogger(__name__)
 
@@ -91,3 +94,10 @@ def create_api_connection_from_config(config_file_location):
     # return connection
     logger.info(f'creating api connection for {user} at {host}')
     return create_api_connection(host=host, user=user, password=password)
+
+
+def creep_body_resource_cost(body):
+    cost = 0
+    for part in body:
+        cost += constants.CREEP_BODY_PART_COST[part]
+    return cost

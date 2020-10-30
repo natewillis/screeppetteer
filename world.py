@@ -69,8 +69,6 @@ class Point:
         return self.room_x_y['y']
 
 
-
-
 class Room:
 
     def __init__(self, row=0, col=0, room_name=None, bottom_left_js_row_col=None):
@@ -262,7 +260,6 @@ class World:
 
         # objects
         self.game_objects = {}
-        self.tasks = {}
 
     def get_snapshot(self):
         self.game_objects = {}

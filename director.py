@@ -1,6 +1,8 @@
 import configparser
 import uuid
 import constants
+from screeps_utilities import creep_body_resource_cost
+
 
 class Director:
     def __init__(self, world, config_file_location):
@@ -26,7 +28,8 @@ class Director:
 
     @property
     def kingdom_flags(self):
-        return [flag for flag in self.world.game_objects.values() if flag.specific_type == 'flag' and flag.color == constants.COLOR_RED]
+        return [flag for flag in self.world.game_objects.values() if
+                flag.specific_type == 'flag' and flag.color == constants.COLOR_RED]
 
     @property
     def kingdom_names(self):
@@ -34,12 +37,14 @@ class Director:
 
     def kingdom_controllers(self):
         flag_rooms = [flag.location(flag.snapshot_tick()).room.js_room_name for flag in self.kingdom_flags]
-        return [controller for controller in self.world.game_objects.values() if controller.location(controller.snapshot_tick).room.js_room_name in flag_rooms and controller.specific_type == 'controller']
+        return [controller for controller in self.world.game_objects.values() if controller.location(
+            controller.snapshot_tick).room.js_room_name in flag_rooms and controller.specific_type == 'controller']
 
     def kingdom_game_objects(self, kingdom_flag):
         game_objects = []
         for game_object in self.world.game_objects.values():
-            closest_flag = min(self.kingdom_flags, key=lambda flag: game_object.starting_location.range(flag.starting_location))
+            closest_flag = min(self.kingdom_flags,
+                               key=lambda flag: game_object.starting_location.range(flag.starting_location))
             if closest_flag.name == kingdom_flag.name:
                 game_objects.append(game_object)
         return game_objects
@@ -64,9 +69,6 @@ class Director:
         for player in self.players:
             player.tasks = dict(filter(lambda task: first_tick <= int(task[0]) < start_tick, player.tasks.items()))
 
-
-
-
         # process jobs (once the creep has a task assigned, it cant be changed)
         # tasks are the criteria that determine if a job has been filled)
         # need to account for uncreated objects so far
@@ -76,8 +78,10 @@ class Director:
         print(self.kingdom_flags)
         # jobs are assign per game controller
         for kingdom_flag in self.kingdom_flags:
+
             print(f'running tasks for {kingdom_flag.name}')
             # pre-collect some objects
+            player = [player for player in self.players if player.player_name == kingdom_flag.owner][0]
             pre_kingdom_objects = self.kingdom_game_objects(kingdom_flag)
             sources = [source for source in pre_kingdom_objects if source.specific_type == 'source']
 
@@ -96,8 +100,10 @@ class Director:
 
                 # get state of world
                 kingdom_game_objects = self.kingdom_game_objects(kingdom_flag)
-                all_of_my_creeps = [creep for creep in kingdom_game_objects if creep.specific_type == 'creep' and creep.owner == kingdom_flag.owner]
-                spawns = [spawn for spawn in kingdom_game_objects if spawn.specific_type == 'spawn' and spawn.owner == kingdom_flag.owner]
+                all_of_my_creeps = [creep for creep in kingdom_game_objects if
+                                    creep.specific_type == 'creep' and creep.owner == kingdom_flag.owner]
+                spawns = [spawn for spawn in kingdom_game_objects if
+                          spawn.specific_type == 'spawn' and spawn.owner == kingdom_flag.owner]
 
                 # Level 0: Energy Harvest Without Storage
                 harvest_level = 0
@@ -114,8 +120,8 @@ class Director:
                 if harvest_level == 0:
                     # harvest level 0 means only the closest source
                     viable_sources.append(sources[0])
-                    print(f'screep should harvest from {viable_sources[0].js_id} of {len(viable_sources)} viable sources out of {len(sources)} total sources seen')
-
+                    print(
+                        f'screep should harvest from {viable_sources[0].js_id} of {len(viable_sources)} viable sources out of {len(sources)} total sources seen')
 
                 # assign creep to each viable source
                 for source in viable_sources:
@@ -130,23 +136,20 @@ class Director:
                         # TODO: assign closest creep and propagate creep forward
                         pass
                     else:
-                        # assign a spawn queue position for this job
-                        assigned_spawn = False
+
+                        # spawn the creep
+                        # TODO: loop backward to test previous positions if the current doesnt work
+                        added_spawn = False
                         for spawn in spawns:
-                            if spawn.store.currently_full('energy'):
-                                # assign creation of creep to this spawn
-
-                                assigned_spawn = True
+                            added_spawn = spawn.spawn_creep(body=harvest_creep, tick=tick)
+                            if added_spawn:
                                 break
-                        pass
-
 
                 # filter
 
-
                 # Energy delivery
-                    # if energy_harvest_state is zero, use utility creep, else delivery creep
-                    # keep the spawn supplied
+                # if energy_harvest_state is zero, use utility creep, else delivery creep
+                # keep the spawn supplied
 
             # Check if the creep who did the task last time was still around, if so use him
             # If he's not there or there wasn't one last time or there wasnt a task for some reason, find the nearest utility creep [WORK,CARRY,MOVE,MOVE]
@@ -165,25 +168,7 @@ class Director:
 
             # Energy Delivery
 
-        # placeholder code for testing spawns
-        for player in self.players:
-            for tick in range(player.snapshot_tick + self.frozen_ticks, player.snapshot_tick + self.future_ticks):
-
-                # add tick if needed
-                if tick not in player.tasks:
-                    player.tasks[tick] = {}
-
-                # add spawn tasks
-                player.tasks[tick]['320727bab8b0c3b'] = {
-                    'recieved': False,
-                    'type': 'spawnCreep',
-                    'details': {
-                        'body': ['move'],
-                        'name': uuid.uuid4().hex
-                    }
-                }
-
         # commit tasks
         for player in self.players:
             pass
-            #player.commit_tasks()
+            # player.commit_tasks()
