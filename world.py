@@ -45,6 +45,31 @@ class Point:
         room_row = int(self.y / 50)
         return Room(row=room_row, col=room_col, bottom_left_js_row_col=self.world.bottom_left_room_js_row_col)
 
+    @property
+    def room_x_y(self):
+
+        # get room
+        room = self.room
+
+        # get relative x y centered at bottom left
+        x = self.x - room.bottom_left_point.x
+        y = self.y - room.bottom_left_point.y
+
+        # get flipped y
+        local_y = 50 - (y + 1)
+
+        return {'x': x, 'y': local_y}
+
+    @property
+    def room_x(self):
+        return self.room_x_y['x']
+
+    @property
+    def room_y(self):
+        return self.room_x_y['y']
+
+
+
 
 class Room:
 
@@ -82,6 +107,7 @@ class Room:
             'col': self.__col + self.__bottom_left_js_col
         })
 
+    @property
     def bottom_left_point(self):
         return Point(x=self.col * 50, y=self.col * 50)
 
@@ -104,7 +130,7 @@ class Room:
     def point_from_js_pos(self, snapshot_json):
 
         # local room position
-        bottom_left_point = self.bottom_left_point()
+        bottom_left_point = self.bottom_left_point
         local_y_from_top = snapshot_json['y']
         local_y = 50 - (local_y_from_top + 1)
         local_x = snapshot_json['x']

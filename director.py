@@ -95,7 +95,9 @@ class Director:
                 tick += 1
 
                 # get state of world
-                all_of_my_creeps = [creep for creep in self.kingdom_game_objects(kingdom_flag) if creep.specific_type == 'creep' and creep.owner == kingdom_flag.owner]
+                kingdom_game_objects = self.kingdom_game_objects(kingdom_flag)
+                all_of_my_creeps = [creep for creep in kingdom_game_objects if creep.specific_type == 'creep' and creep.owner == kingdom_flag.owner]
+                spawns = [spawn for spawn in kingdom_game_objects if spawn.specific_type == 'spawn' and spawn.owner == kingdom_flag.owner]
 
                 # Level 0: Energy Harvest Without Storage
                 harvest_level = 0
@@ -104,6 +106,8 @@ class Director:
                 # Level 1: Energy Harvest With Storage And Minimum Harvester (BASIC_UTILITY_CREEP)
 
                 # Level 2: Energy Harvest With Storage And Maximum Harvester (HARVEST_CREEP)
+
+                #
 
                 # harvest from sources and throw in container or carry
                 viable_sources = []
@@ -117,7 +121,7 @@ class Director:
                 for source in viable_sources:
                     # TODO: look into looking at prior job assignment
                     # get unassigned creeps who can do this job
-                    unassigned_creeps = [] # TODO: actually get the unassigned creeps
+                    unassigned_creeps = []  # TODO: actually get the unassigned creeps
 
                     if len(unassigned_creeps) > 0:
 
@@ -127,6 +131,13 @@ class Director:
                         pass
                     else:
                         # assign a spawn queue position for this job
+                        assigned_spawn = False
+                        for spawn in spawns:
+                            if spawn.store.currently_full('energy'):
+                                # assign creation of creep to this spawn
+
+                                assigned_spawn = True
+                                break
                         pass
 
 
