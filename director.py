@@ -1,7 +1,7 @@
 import configparser
 import uuid
 import constants
-from screeps_utilities import creep_body_resource_cost
+from screeps_utilities import creep_body_spawn_time
 
 
 class Director:
@@ -120,8 +120,7 @@ class Director:
                 if harvest_level == 0:
                     # harvest level 0 means only the closest source
                     viable_sources.append(sources[0])
-                    print(
-                        f'screep should harvest from {viable_sources[0].js_id} of {len(viable_sources)} viable sources out of {len(sources)} total sources seen')
+                    print(f'screep should harvest from {viable_sources[0].js_id} of {len(viable_sources)} viable sources out of {len(sources)} total sources seen')
 
                 # assign creep to each viable source
                 for source in viable_sources:
@@ -129,21 +128,24 @@ class Director:
                     # get unassigned creeps who can do this job
                     unassigned_creeps = []  # TODO: actually get the unassigned creeps
 
-                    if len(unassigned_creeps) > 0:
-
-                        # TODO: sort by who's closest
-
-                        # TODO: assign closest creep and propagate creep forward
-                        pass
-                    else:
+                    if len(unassigned_creeps) == 0:
 
                         # spawn the creep
                         # TODO: loop backward to test previous positions if the current doesnt work
+                        # TODO: figure out how long its going to take to get to the task
+                        #ideal_start_tick = creep_body_spawn_time(harvest_creep)+self.world.
                         added_spawn = False
                         for spawn in spawns:
                             added_spawn = spawn.spawn_creep(body=harvest_creep, tick=tick)
                             if added_spawn:
                                 break
+
+                    else:
+                        # TODO: sort by who's closest
+                        # TODO: assign closest creep and propagate creep forward
+                        pass
+
+                    #TODO: take the either chosen or created creep and get him to the harvest location
 
                 # filter
 

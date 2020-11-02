@@ -1,6 +1,6 @@
 import networkx as nx
 import configparser
-from screeps_utilities import room_js_row_col, js_row_col_to_room, create_api_connection_from_config
+from screeps_utilities import room_js_row_col, js_row_col_to_room, create_api_connection_from_config, is_edge_of_room_from_terrain_index
 import os
 import numpy as np
 import pickle
@@ -34,7 +34,7 @@ class Point:
         return f'x:{self.x} y:{self.y}'
 
     def __hash__(self):
-        return hash((self.x, self.y))
+        return self.x, self.y
 
     def range(self, point):
         return (abs(self.x-point.x)**2 + abs(self.y-point.y)**2)**0.5
@@ -67,6 +67,13 @@ class Point:
     @property
     def room_y(self):
         return self.room_x_y['y']
+
+    def path_to(self, point):
+        return self.world.path_between(self, point)
+
+    @property
+    def node(self):
+        return self.x, self.y
 
 
 class Room:
@@ -117,8 +124,8 @@ class Room:
         local_x = (terrain_index - (local_y_from_top * 50))
 
         # absolute position
-        y = local_y + (self.col * 50)
-        x = local_x + (self.row * 50)
+        y = local_y + (self.row * 50)
+        x = local_x + (self.col * 50)
 
         return Point(x=x, y=y)
 
@@ -134,8 +141,8 @@ class Room:
         local_x = snapshot_json['x']
 
         # absolute position
-        y = local_y + (self.col * 50)
-        x = local_x + (self.row * 50)
+        y = local_y + (self.row * 50)
+        x = local_x + (self.col * 50)
 
         # return point object
         return Point(x=x, y=y)
@@ -206,6 +213,9 @@ class Terrain:
             # logging
             logger.info(f'pulled {room.js_room_name} from server')
 
+        if room.js_room_name == 'W10N0':
+            print(terrain_string)
+
         # loop through terrain string for weights
         for terrain_character_index in range(0, len(terrain_string)):
             terrain_point = room.point_from_terrain_index(terrain_character_index)
@@ -213,8 +223,10 @@ class Terrain:
             terrain_weight = 255  # wall
             if terrain_character == '0':  # plain
                 terrain_weight = 2
-            elif terrain_character == '1':  # swamp
+            elif terrain_character == '2':  # swamp
                 terrain_weight = 10
+            if is_edge_of_room_from_terrain_index(terrain_character_index):
+                terrain_weight += 0.1
             self.terrain_matrix[terrain_point.y, terrain_point.x] = terrain_weight
 
     def init_terrain_map(self):
@@ -225,12 +237,12 @@ class Terrain:
 
         # init numpy array
         logger.info(f'world has rows {world_rows} and cols {world_cols}')
-        self.terrain_matrix = np.zeros((world_rows * 50, world_cols * 50), dtype=np.intc)
+        self.terrain_matrix = np.zeros((world_rows * 50, world_cols * 50))
 
         # loop through rows
         for world_row in range(0, world_rows):
             for world_col in range(0, world_cols):
-                world_room = Room(row=world_row, col=world_col, bottom_left_js_row_col = self.bottom_left_room_js_row_col)
+                world_room = Room(row=world_row, col=world_col, bottom_left_js_row_col=self.bottom_left_room_js_row_col)
                 self.update_terrain_map_from_room(world_room)
 
         # save cache
@@ -258,6 +270,16 @@ class World:
         self.terrain = Terrain(api=self.api, bottom_left_room_js_row_col=self.bottom_left_room_js_row_col,
                                top_right_room_js_row_col=self.top_right_room_js_row_col)
 
+        # cache networkx grid
+        self.networkx_graph = None
+        self.networkx_graph_pickle_path = 'data/networkx_graph.pickle'
+        if os.path.exists(self.networkx_graph_pickle_path):
+            with open(self.networkx_graph_pickle_path, 'rb') as handle:
+                self.networkx_graph = pickle.load(handle)
+
+        # networkx grid
+        self.init_networkx_graph()
+
         # objects
         self.game_objects = {}
 
@@ -277,6 +299,65 @@ class World:
     def init_new_turn(self):
         self.game_objects = {}
         self.tasks = {}
+
+    def init_networkx_graph(self):
+
+        if self.networkx_graph is None:
+
+            # init empty graph
+            self.networkx_graph = nx.Graph()
+
+            # parameters for easy calcs
+            num_rows, num_cols = self.terrain.terrain_matrix.shape
+            max_x = num_cols - 1
+            max_y = num_rows - 1
+
+            # create a point for each location on map
+            print('init networkx graph')
+            for x in range(0, num_cols):
+                for y in range(0, num_rows):
+                    start_node = (x, y)
+                    for d_x in [-1, 0, 1]:
+                        for d_y in [-1, 0, 1]:
+                            # dont worry about the center point
+                            if d_x == 0 and d_y == 0:
+                                continue
+
+                            # create end node
+                            end_x = x + d_x
+                            end_y = y + d_y
+
+                            # test if this point is valid
+                            if end_x > max_x or end_x < 0:
+                                continue
+                            if end_y > max_y or end_y < 0:
+                                continue
+
+                            # create end node
+                            end_node = (end_x, end_y)
+
+                            # add edges
+                            self.networkx_graph.add_nodes_from([start_node, end_node])
+                            self.networkx_graph.add_edge(start_node, end_node)
+
+            # save the graph
+            with open(self.networkx_graph_pickle_path, 'wb') as handle:
+                pickle.dump(self.networkx_graph, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+            print('done creating networkx graph')
+
+    def path_between(self, from_point, to_point, status_tick):
+
+        # find path with just terrain
+        start_grid = self.terrain.terrain_matrix.copy()
+
+        # define weight function
+        def weight_func(from_tuple, to_tuple, edge_dictionary):
+            return start_grid[from_tuple[1], from_tuple[0]]
+
+        path = nx.astar_path(G=self.networkx_graph, source=from_point.node, target=to_point.node, weight=weight_func)
+        return path
+
 
 
 

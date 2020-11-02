@@ -1,7 +1,7 @@
 import uuid
 from world import Point
 import constants
-from screeps_utilities import creep_body_resource_cost
+from screeps_utilities import creep_body_resource_cost, delta_from_direction
 
 # logging
 import logging
@@ -85,7 +85,7 @@ class GameObject:
 
     @property
     def starting_location(self):
-        return self.location(self.snapshot_tick)
+        return self.__initial_location
 
     def __str__(self):
         return f'{self.specific_type} with id of {self.universal_id} initialized at tick {self.__initial_tick}'
@@ -136,14 +136,32 @@ class GameObject:
         return busy
 
 
-class MovingObject(GameObject):
-    pass
-
-
 class Creep(GameObject):
 
     def __init__(self, *args, **kwargs):
         GameObject.__init__(self, *args, **kwargs)
+
+    def location(self, tick):
+
+        # make sure theyre not asking for something unreasonable
+        if tick < self.snapshot_tick:
+            return None
+
+        # get tasks
+        tasks = self.tasks
+
+        # init location
+        current_location = self.starting_location
+        for current_tick in range(self.snapshot_tick, tick-1):
+            if current_tick in tasks:
+                task = tasks[current_tick]
+                if task['type'] == 'move':
+                    direction = task['details']['direction']
+                    delta = delta_from_direction(direction)
+                    current_location = Point(x=(current_location.x+delta['x']), y=(current_location.y+delta['y']), world=self.world)
+
+        # return propagated locaiton
+        return current_location
 
 
 class Store:
@@ -243,7 +261,7 @@ class Spawn(GameObject):
             'tick': tick,
             'resource_type': 'energy'
         }
-        number_of_ticks = len(body)
+        number_of_ticks = creep_body_resource_cost(body)
 
         # check if the spawn is busy
         if not self.busy(tick=tick, number_of_ticks=number_of_ticks):
@@ -272,14 +290,25 @@ class Spawn(GameObject):
                 }
                 self.add_task(task)
 
+                #TODO: add creep to the objects
+
+
                 # assign wait options for length of build
-                for loop_tick in range(tick+1, tick+len(body))
+                for loop_tick in range(tick+1, tick+number_of_ticks):
+                    task = {
+                        {
+                            'received': False,
+                            'tick': loop_tick,
+                            'assigned_to': self.universal_id,
+                            'type': 'wait',
+                            'desired_return_value': 99,
+                            'details': {}
+                        }
+                    }
+                    self.add_task(task)
 
         # return status
         return spawned
-
-
-
 
 class Flag(GameObject):
 

@@ -101,3 +101,40 @@ def creep_body_resource_cost(body):
     for part in body:
         cost += constants.CREEP_BODY_PART_COST[part]
     return cost
+
+
+def creep_body_spawn_time(body):
+    return len(body) * constants.CREEP_SPAWN_TIME
+
+
+def delta_from_direction(direction):
+    if direction == constants.TOP:
+        delta = {'x': 0, 'y': 1}
+    elif direction == constants.TOP_RIGHT:
+        delta = {'x': 1, 'y': 1}
+    elif direction == constants.RIGHT:
+        delta = {'x': 1, 'y': 0}
+    elif direction == constants.BOTTOM_RIGHT:
+        delta = {'x': 1, 'y': -1}
+    elif direction == constants.BOTTOM:
+        delta = {'x': 0, 'y': -1}
+    elif direction == constants.BOTTOM_LEFT:
+        delta = {'x': -1, 'y': -1}
+    elif direction == constants.LEFT:
+        delta = {'x': -1, 'y': 0}
+    elif direction == constants.TOP_LEFT:
+        delta = {'x': -1, 'y': 1}
+    return delta
+
+
+def is_edge_of_room_from_terrain_index(terrain_index):
+
+    # calculate row from the top
+    local_y_from_top = (terrain_index // 50)
+    local_x = (terrain_index - (local_y_from_top * 50))
+
+    # if logic
+    if local_y_from_top == 0 or local_y_from_top == 49 or local_x == 0 or local_x == 49:
+        return True
+    else:
+        return False

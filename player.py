@@ -25,7 +25,6 @@ class Player:
         self.player_name = config['PLAYER']['player_name']
 
         # init objects
-        self.game_objects = {}
         self.tasks = {}
 
         # init timing
@@ -41,23 +40,23 @@ class Player:
         # grab the current tick
         self.snapshot_tick = int(raw_memory['snapshot']['game_time'])
 
-        # clear out game objects
-        self.game_objects = {}
+        # init game objects
+        game_objects = {}
 
         # process snapshot objects
         for game_object_id, game_object in raw_memory['snapshot']['objects'].items():
             if game_object['code_type'] == 'structure':
                 if game_object['structure_type'] == 'spawn':
-                    self.game_objects[game_object['name']] = Spawn(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
+                    game_objects[game_object['universal_id']] = Spawn(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
             elif game_object['code_type'] == 'flag':
-                self.game_objects[game_object['name']] = Flag(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
+                game_objects[game_object['universal_id']] = Flag(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
             elif game_object['code_type'] == 'source':
-                self.game_objects[game_object['id']] = Source(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
+                game_objects[game_object['universal_id']] = Source(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
             elif game_object['code_type'] == 'creep':
-                self.game_objects[game_object['name']] = Creep(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
+                game_objects[game_object['universal_id']] = Creep(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
 
         # update world objects
-        self.world.game_objects.update(self.game_objects)
+        self.world.game_objects.update(game_objects)
 
         # grab existing tasks
         self.tasks = raw_memory['tasks']
