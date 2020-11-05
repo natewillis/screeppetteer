@@ -73,17 +73,21 @@ class Director:
         # tasks are the criteria that determine if a job has been filled)
         # need to account for uncreated objects so far
         # TODO: Enemy SA
-        for game_object in self.world.game_objects.values():
-            print(game_object)
-        print(self.kingdom_flags)
+
         # jobs are assign per game controller
         for kingdom_flag in self.kingdom_flags:
 
             print(f'running tasks for {kingdom_flag.name}')
+            print('hi')
             # pre-collect some objects
+            print(self.players[0].player_name)
+            print(kingdom_flag.owner)
             player = [player for player in self.players if player.player_name == kingdom_flag.owner][0]
+            print(player)
             pre_kingdom_objects = self.kingdom_game_objects(kingdom_flag)
+            print(pre_kingdom_objects)
             sources = [source for source in pre_kingdom_objects if source.specific_type == 'source']
+            print(sources)
 
             # sort sources to put closest first
             sources.sort(key=lambda source: source.starting_location.range(kingdom_flag.starting_location))
@@ -93,10 +97,12 @@ class Director:
             ############ ENERGY Planning ###########
             # setup loop
             tick = start_tick - 1
+            print(f'loop from {tick} to {end_tick}')
             while tick <= end_tick:
 
                 # increment tick
                 tick += 1
+                print(f'energy loop on tick {tick}')
 
                 # get state of world
                 kingdom_game_objects = self.kingdom_game_objects(kingdom_flag)
@@ -133,11 +139,23 @@ class Director:
                         # spawn the creep
                         # TODO: loop backward to test previous positions if the current doesnt work
                         # TODO: figure out how long its going to take to get to the task
-                        #ideal_start_tick = creep_body_spawn_time(harvest_creep)+self.world.
                         added_spawn = False
                         for spawn in spawns:
-                            added_spawn = spawn.spawn_creep(body=harvest_creep, tick=tick)
-                            if added_spawn:
+
+                            # calculate how long it would take to get from spawn to
+                            latest_start_tick = tick - creep_body_spawn_time(harvest_creep)
+                            finish_tick = tick
+                            spawn_pt = spawn.spawn_point
+                            harvest_pt = source.harvest_location
+
+                            while finish_tick > tick:
+                                latest_start_tick -= 1
+                                (path, path_ticks) = self.world.path_for_body_at_time(body=harvest_creep, from_point=spawn_pt, to_point=harvest_pt, start_tick=latest_start_tick)
+                                finish_tick = path_ticks[-1]
+                            print(path)
+                            added_spawn = spawn.spawn_creep(body=harvest_creep, tick=latest_start_tick-creep_body_spawn_time(harvest_creep))
+                            if added_spawn is not None:
+                                # we did it!, now tell him to get to the harvest area
                                 break
 
                     else:

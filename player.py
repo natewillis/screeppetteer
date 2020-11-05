@@ -1,6 +1,7 @@
 from screeps_utilities import create_api_connection_from_config
 import configparser
 from game_objects import Spawn, Flag, Source, Creep
+import constants
 
 # logging
 import logging
@@ -47,13 +48,14 @@ class Player:
         for game_object_id, game_object in raw_memory['snapshot']['objects'].items():
             if game_object['code_type'] == 'structure':
                 if game_object['structure_type'] == 'spawn':
-                    game_objects[game_object['universal_id']] = Spawn(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
+                    game_objects[game_object['universal_id']] = Spawn(game_object_json=game_object, tick=self.snapshot_tick, world=self.world, player=self)
             elif game_object['code_type'] == 'flag':
-                game_objects[game_object['universal_id']] = Flag(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
+                game_object['owner'] = self.player_name
+                game_objects[game_object['universal_id']] = Flag(game_object_json=game_object, tick=self.snapshot_tick, world=self.world, player=self)
             elif game_object['code_type'] == 'source':
-                game_objects[game_object['universal_id']] = Source(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
+                game_objects[game_object['universal_id']] = Source(game_object_json=game_object, tick=self.snapshot_tick, world=self.world, player=self)
             elif game_object['code_type'] == 'creep':
-                game_objects[game_object['universal_id']] = Creep(game_object_json=game_object, tick=self.snapshot_tick, world=self.world)
+                game_objects[game_object['universal_id']] = Creep(game_object_json=game_object, tick=self.snapshot_tick, world=self.world, player=self)
 
         # update world objects
         self.world.game_objects.update(game_objects)
@@ -63,4 +65,12 @@ class Player:
 
     def commit_tasks(self):
         self.api.set_memory('tasks', self.tasks)
+
+    @property
+    def kingdom_flags(self):
+        return [flag for flag in self.world.game_objects.values() if
+                flag.specific_type == 'flag' and flag.color == constants.COLOR_RED and flag.owner == self.player_name]
+
+
+
 

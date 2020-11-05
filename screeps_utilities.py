@@ -37,7 +37,7 @@ def js_row_col_to_room(js_row_col):
     return f'{e_w}{room_col}{n_s}{room_row}'
 
 
-def room_js_row_col(room_name):
+def js_room_row_col(room_name):
     # E0N0 is 0,0
     # init return variables
     # its better to ask forgiveness than permission
@@ -125,6 +125,10 @@ def delta_from_direction(direction):
     elif direction == constants.TOP_LEFT:
         delta = {'x': -1, 'y': 1}
     return delta
+
+
+def edge_of_room():
+    pass
 
 
 def is_edge_of_room_from_terrain_index(terrain_index):

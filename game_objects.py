@@ -5,13 +5,14 @@ from screeps_utilities import creep_body_resource_cost, delta_from_direction
 
 # logging
 import logging
+
 logger = logging.getLogger(__name__)
 
 
 # classes
 class GameObject:
 
-    def __init__(self, game_object_json, tick, world):
+    def __init__(self, game_object_json, tick, world, player=None):
 
         # world reference
         self.world = world
@@ -25,10 +26,14 @@ class GameObject:
         self.color = game_object_json['color'] if 'color' in game_object_json else None
         self.secondary_color = game_object_json['secondary_color'] if 'secondary_color' in game_object_json else None
         self.owner = game_object_json['owner'] if 'owner' in game_object_json else None
+        self.player = player
+        self.detailed_body = game_object_json['detailed_body'] if 'detailed_body' in game_object_json else None
+        self.static_object = True
+        self.passable = False
 
         # special parameters
-        self.store = Store(game_object_json=game_object_json['store'], tick=tick) if 'store' in game_object_json else None
-
+        self.store = Store(game_object_json=game_object_json['store'],
+                           tick=tick, world=world) if 'store' in game_object_json else None
 
         # specific type is the combo of structure type and code_type
         self.specific_type = ''
@@ -38,7 +43,7 @@ class GameObject:
             self.specific_type = self.structure_type
 
         # dynamic parameters
-        #TODO: get initial location converted
+        # TODO: get initial location converted
         self.__initial_location = Point(snapshot_json=game_object_json['pos'], world=self.world)
         self.__initial_tick = tick
         self.__initial_hits = game_object_json['hits'] if 'hits' in game_object_json else None
@@ -63,14 +68,6 @@ class GameObject:
 
         # return tasks
         return tasks
-
-    @property
-    def player(self):
-        players = [player for player in self.world.players if player.player_name == self.owner]
-        if len(players) == 0:
-            return None
-        else:
-            return players[0]
 
     def add_task(self, task):
         if task.tick not in self.player.tasks:
@@ -128,18 +125,29 @@ class GameObject:
         tasks = self.tasks
 
         # loop through period to see if tasks
-        for tick in range(tick, tick+number_of_ticks):
+        for tick in range(tick, tick + number_of_ticks):
             if tick in tasks:
                 busy = True
 
         # return busy
         return busy
 
+    @property
+    def kingdom_flag(self):
+
+        # only players have kingdom flags
+        if self.player is None:
+            return None
+
+        # find closest flag
+        return min(self.player.kingdom_flags, key=lambda flag: self.starting_location.range(flag.starting_location))
+
 
 class Creep(GameObject):
 
     def __init__(self, *args, **kwargs):
         GameObject.__init__(self, *args, **kwargs)
+        self.static_object = False
 
     def location(self, tick):
 
@@ -152,16 +160,43 @@ class Creep(GameObject):
 
         # init location
         current_location = self.starting_location
-        for current_tick in range(self.snapshot_tick, tick-1):
+        for current_tick in range(self.snapshot_tick, tick - 1):
             if current_tick in tasks:
                 task = tasks[current_tick]
                 if task['type'] == 'move':
                     direction = task['details']['direction']
                     delta = delta_from_direction(direction)
-                    current_location = Point(x=(current_location.x+delta['x']), y=(current_location.y+delta['y']), world=self.world)
+                    current_location = Point(x=(current_location.x + delta['x']), y=(current_location.y + delta['y']),
+                                             world=self.world)
 
         # return propagated locaiton
         return current_location
+
+    @property
+    def body(self):
+        body = []
+        # TODO: account for hits and boost
+        for body_detail in self.detailed_body:
+            body.append(body_detail['type'])
+        return body
+
+    def assign_path(self, path, start_tick):
+        if len(path) <= 1:
+            return False
+        for pt_num in range(1, len(path)):
+            # create move task
+            task = {
+                'received': False,
+                'tick': start_tick,
+                'assigned_to': self.universal_id,
+                'type': 'move',
+                'desired_return_value': 0,
+                'details': {
+                    'direction': path[pt_num-1].move_direction_to_point(path[pt_num]),
+                }
+            }
+            self.add_task(task)
+        return True
 
 
 class Store:
@@ -183,7 +218,7 @@ class Store:
         self.reservations = {}
 
     def __str__(self):
-        return f'source with contents {self.__current_capacity.items()}'
+        return f'source with contents {self.__initial_used_capacity.items()}'
 
     @property
     def currently_full(self, resource_type):
@@ -201,7 +236,7 @@ class Store:
                     contents[reservation['resource_type']] += reservation['amount']
             if self.regen_per_tick != 0:
                 for resource_type in contents:
-                    if contents[resource_type] <  self.__capacity[resource_type]:
+                    if contents[resource_type] < self.__capacity[resource_type]:
                         contents[resource_type] += self.regen_per_tick
 
         return contents
@@ -215,7 +250,7 @@ class Store:
         contents = self.__initial_used_capacity.copy()
 
         # loop through all ticks
-        for tick in range(self.__initial_tick, tick+1):
+        for tick in range(self.__initial_tick, tick + 1):
 
             # process reservations
             if tick in self.reservations:
@@ -246,14 +281,21 @@ class Spawn(GameObject):
 
         # run parent init
         GameObject.__init__(self, *args, **kwargs)
+        self.static_object = True
+        self.passable = False
 
     def __str__(self):
-        return f'spawn named {self.nice_id()} and store {self._GameObject__store}'
+        return f'spawn named {self.universal_id} and store {self.store}'
+
+    @property
+    def spawn_point(self):
+        # TODO: calc a more realistic spawn point
+        return self.world.point(x=self.starting_location.x, y=self.starting_location.y + 1)
 
     def spawn_creep(self, body, tick):
 
         # init spawned bool
-        spawned = True
+        spawned_creep = None
 
         # create variables associated with creep spawn
         reservation = {
@@ -276,47 +318,65 @@ class Spawn(GameObject):
 
                 # assign actions for creep creation
                 task = {
-                    {
-                        'received': False,
-                        'tick': tick,
-                        'assigned_to': self.universal_id,
-                        'type': 'spawnCreep',
-                        'desired_return_value': 0,
-                        'details': {
-                            'body': body,
-                            'name': uuid.uuid4().hex
-                        }
+                    'received': False,
+                    'tick': tick,
+                    'assigned_to': self.universal_id,
+                    'type': 'spawnCreep',
+                    'desired_return_value': 0,
+                    'details': {
+                        'body': body,
+                        'name': uuid.uuid4().hex
                     }
                 }
                 self.add_task(task)
 
-                #TODO: add creep to the objects
+                # create creep json object
+                spawn_pt = self.spawn_pt
+                creep_json = {
+                    'name': task['details']['name'],
+                    'detailed_body': [{'type': body_part, 'hits': 100, 'boost': None} for body_part in body],
+                    'code_type': 'creep',
+                    'pos': {'room_name': spawn_pt.js_room_name, 'x': spawn_pt.room_x, 'y': spawn_pt.room_y}
+                }
 
+                # create creep
+                spawned_creep = Creep(snapshot_json=creep_json, tick=tick, world=self.world, player=self.player)
+
+                # TODO: add creep to the objects
 
                 # assign wait options for length of build
-                for loop_tick in range(tick+1, tick+number_of_ticks):
+                for loop_tick in range(tick + 1, tick + number_of_ticks):
                     task = {
-                        {
-                            'received': False,
-                            'tick': loop_tick,
-                            'assigned_to': self.universal_id,
-                            'type': 'wait',
-                            'desired_return_value': 99,
-                            'details': {}
-                        }
+                        'received': False,
+                        'tick': loop_tick,
+                        'assigned_to': self.universal_id,
+                        'type': 'wait',
+                        'desired_return_value': 99,
+                        'details': {}
                     }
-                    self.add_task(task)
+            self.add_task(task)
 
-        # return status
-        return spawned
+            # return status
+
+        return spawned_creep
+
 
 class Flag(GameObject):
 
     def __init__(self, *args, **kwargs):
         GameObject.__init__(self, *args, **kwargs)
+        self.passable = True
 
 
 class Source(GameObject):
 
     def __init__(self, *args, **kwargs):
         GameObject.__init__(self, *args, **kwargs)
+
+    @property
+    def harvest_location(self):
+        # TODO: search for storage near it first, otherwise pick where storage should go
+        print(f'path from {self.starting_location} and path to {self.kingdom_flag.starting_location}')
+        path_to_flag = self.starting_location.path_to(to_point=self.kingdom_flag.starting_location)
+        print(f'returned path is {path_to_flag}')
+        return path_to_flag[1]
