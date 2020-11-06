@@ -11,15 +11,23 @@ logger = logging.getLogger(__name__)
 class Player:
     def __init__(self, config_file_location, world):
 
-        # connect to api
-        self.api = create_api_connection_from_config(config_file_location)
-
-        # store a reference to the world the player is in
-        self.world = world
-
         # get username and password from safe file
         config = configparser.ConfigParser()
         config.read(config_file_location)
+
+        # check if this is a test run
+        self.test = False
+        if 'TEST' in config:
+            if 'no_server_test' in config['TEST']:
+                self.test = config['TEST']['no_server_test']
+
+        # connect to api
+        self.api = None
+        if not self.test:
+            self.api = create_api_connection_from_config(config_file_location)
+
+        # store a reference to the world the player is in
+        self.world = world
 
         # player info
         self.shard = config['WORLD']['shard']
@@ -31,11 +39,14 @@ class Player:
         # init timing
         self.snapshot_tick = 0
 
-    def get_snapshot(self):
+    def get_snapshot(self, saved_snapshot=None):
 
         # query screeps for snapshot memory
-        raw_memory_response = self.api.memory('', shard=self.shard)  # assuming json dictionary at this point
-        raw_memory = raw_memory_response['data']
+        if saved_snapshot is None:
+            raw_memory_response = self.api.memory('', shard=self.shard)  # assuming json dictionary at this point
+            raw_memory = raw_memory_response['data']
+        else:
+            raw_memory = saved_snapshot
         print(raw_memory_response)
 
         # grab the current tick

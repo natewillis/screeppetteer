@@ -34,7 +34,7 @@ class Point:
         return self.x, self.y
 
     def range(self, point):
-        return max((self.x-point.x)(self.y-point.y))
+        return max((self.x-point.x), (self.y-point.y))
 
     @property
     def room(self):
@@ -66,7 +66,7 @@ class Point:
         return self.js_x_y['y']
 
     def path_to(self, to_point, bad_pts=[], include_static_objects=True, ignore_terrain_differences=False):
-        return self.world.path_between(from_point=self, to_point=self, bad_pts=bad_pts, include_static_objects=include_static_objects, ignore_terrain_differences=ignore_terrain_differences)
+        return self.world.path_between(from_point=self, to_point=to_point, bad_pts=bad_pts, include_static_objects=include_static_objects, ignore_terrain_differences=ignore_terrain_differences)
 
     @property
     def node(self):
@@ -417,7 +417,7 @@ class World:
                 pickle.dump(self.networkx_graph, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     def path_between(self, from_point, to_point, bad_pts=[], include_static_objects=True, ignore_terrain_differences=False):
-
+        print(f'finding a path between {from_point} to {to_point}')
         # find path with just terrain
         start_grid = self.terrain.terrain_matrix.copy()
 
@@ -443,6 +443,7 @@ class World:
             return start_grid[from_tuple[1], from_tuple[0]]
 
         path = nx.astar_path(G=self.networkx_graph, source=from_point.node, target=to_point.node, weight=weight_func)
+        print(path)
         return path
 
     def path_for_body_at_time(self, from_point, to_point, start_tick, body, start_fatigue=0):

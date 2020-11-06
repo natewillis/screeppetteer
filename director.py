@@ -49,7 +49,7 @@ class Director:
                 game_objects.append(game_object)
         return game_objects
 
-    def direct_single_turn(self):
+    def direct_single_turn(self, saved_snapshot=None):
 
         # clear world objects
         self.world.init_new_turn()
@@ -57,7 +57,7 @@ class Director:
         # get data from current ick
         for player in self.players:
             # object data
-            player.get_snapshot()
+            player.get_snapshot(saved_snapshot)
 
         # get earliest tick
         first_tick = min([player.snapshot_tick for player in self.players])
@@ -78,16 +78,11 @@ class Director:
         for kingdom_flag in self.kingdom_flags:
 
             print(f'running tasks for {kingdom_flag.name}')
-            print('hi')
+
             # pre-collect some objects
-            print(self.players[0].player_name)
-            print(kingdom_flag.owner)
-            player = [player for player in self.players if player.player_name == kingdom_flag.owner][0]
-            print(player)
+            player = kingdom_flag.player
             pre_kingdom_objects = self.kingdom_game_objects(kingdom_flag)
-            print(pre_kingdom_objects)
             sources = [source for source in pre_kingdom_objects if source.specific_type == 'source']
-            print(sources)
 
             # sort sources to put closest first
             sources.sort(key=lambda source: source.starting_location.range(kingdom_flag.starting_location))
@@ -108,6 +103,7 @@ class Director:
                 kingdom_game_objects = self.kingdom_game_objects(kingdom_flag)
                 all_of_my_creeps = [creep for creep in kingdom_game_objects if
                                     creep.specific_type == 'creep' and creep.owner == kingdom_flag.owner]
+                harvest_creeps = [creep for creep in all_of_my_creeps if creep.body == harvest_creep]
                 spawns = [spawn for spawn in kingdom_game_objects if
                           spawn.specific_type == 'spawn' and spawn.owner == kingdom_flag.owner]
 
@@ -130,33 +126,50 @@ class Director:
 
                 # assign creep to each viable source
                 for source in viable_sources:
-                    # TODO: look into looking at prior job assignment
+
+                    # source information
+                    harvest_pt = source.harvest_location
+
+                    # loop through creeps to see if any are currently harvesting here
+                    source_harvested = False
+                    for creep in harvest_creeps:
+                        creep_task = creep.task(tick)
+                        if creep_task is not None:
+                            if creep_task['type'] == 'harvest':
+                                if creep_task['details']['target'] == source.js_id:
+                                    source_harvested = True
+                                    break
+                    if source_harvested:
+                        continue
+
                     # get unassigned creeps who can do this job
-                    unassigned_creeps = []  # TODO: actually get the unassigned creeps
+                    unassigned_creeps = [creep for creep in harvest_creeps if creep.task(tick) is None]
 
                     if len(unassigned_creeps) == 0:
 
                         # spawn the creep
                         # TODO: loop backward to test previous positions if the current doesnt work
                         # TODO: figure out how long its going to take to get to the task
-                        added_spawn = False
+                        spawned_creep = None
                         for spawn in spawns:
 
                             # calculate how long it would take to get from spawn to
-                            latest_start_tick = tick - creep_body_spawn_time(harvest_creep)
-                            finish_tick = tick
-                            spawn_pt = spawn.spawn_point
-                            harvest_pt = source.harvest_location
+                            latest_spawn_start_tick = tick - creep_body_spawn_time(harvest_creep)
 
-                            while finish_tick > tick:
-                                latest_start_tick -= 1
-                                (path, path_ticks) = self.world.path_for_body_at_time(body=harvest_creep, from_point=spawn_pt, to_point=harvest_pt, start_tick=latest_start_tick)
+                            # setup loop
+                            finish_tick = tick-1
+                            spawn_pt = spawn.spawn_point
+                            while finish_tick > tick and (latest_spawn_start_tick+1) >= start_tick:
+                                latest_spawn_start_tick -= 1
+                                (path, path_ticks) = self.world.path_for_body_at_time(body=harvest_creep, from_point=spawn_pt, to_point=harvest_pt, start_tick=latest_spawn_start_tick)
                                 finish_tick = path_ticks[-1]
-                            print(path)
-                            added_spawn = spawn.spawn_creep(body=harvest_creep, tick=latest_start_tick-creep_body_spawn_time(harvest_creep))
-                            if added_spawn is not None:
-                                # we did it!, now tell him to get to the harvest area
-                                break
+                            if finish_tick <= tick:
+                                spawned_creep = spawn.spawn_creep(body=harvest_creep, spawn_start_tick=latest_spawn_start_tick-creep_body_spawn_time(harvest_creep))
+                                if spawned_creep is not None:
+                                    # we did it!, now tell him to get to the harvest area
+                                    spawned_creep.assign_path(path, path_ticks[0])
+                                    print(f'we added {spawned_creep} to the objects on tick {latest_spawn_start_tick}')
+                                    break
 
                     else:
                         # TODO: sort by who's closest
@@ -190,5 +203,4 @@ class Director:
 
         # commit tasks
         for player in self.players:
-            pass
-            # player.commit_tasks()
+            player.commit_tasks()

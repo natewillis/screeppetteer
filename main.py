@@ -18,8 +18,8 @@ if __name__ == '__main__':
     director = Director(world=world, config_file_location='local_server.config')
 
     # initalize players
-    #director.add_player(Player(config_file_location='local_server.config', world=world))
+    director.add_player(Player(config_file_location='local_server.config', world=world))
 
     # test cycle
-    #director.direct_single_turn()
+    director.direct_single_turn()
 

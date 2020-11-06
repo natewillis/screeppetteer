@@ -1,7 +1,7 @@
 import uuid
 from world import Point
 import constants
-from screeps_utilities import creep_body_resource_cost, delta_from_direction
+from screeps_utilities import creep_body_resource_cost, delta_from_direction, creep_body_spawn_time
 
 # logging
 import logging
@@ -14,6 +14,7 @@ class GameObject:
 
     def __init__(self, game_object_json, tick, world, player=None):
 
+        print(game_object_json)
         # world reference
         self.world = world
 
@@ -44,7 +45,7 @@ class GameObject:
 
         # dynamic parameters
         # TODO: get initial location converted
-        self.__initial_location = Point(snapshot_json=game_object_json['pos'], world=self.world)
+        self.__initial_location = self.world.point(snapshot_json=game_object_json['pos'])
         self.__initial_tick = tick
         self.__initial_hits = game_object_json['hits'] if 'hits' in game_object_json else None
 
@@ -69,13 +70,16 @@ class GameObject:
         # return tasks
         return tasks
 
-    def add_task(self, task):
-        if task.tick not in self.player.tasks:
-            self.player.tasks[task.tick] = {}
-        self.player.tasks[task.tick][self.universal_id] = task
+    def task(self, tick):
+        for task in self.tasks:
+            if task['tick'] == tick:
+                return task
+        return None
 
-    def reset_properties(self):
-        pass
+    def add_task(self, task):
+        if task['tick'] not in self.player.tasks:
+            self.player.tasks[task['tick']] = {}
+        self.player.tasks[task['tick']][self.universal_id] = task
 
     def location(self, tick):
         return self.__initial_location
@@ -85,7 +89,7 @@ class GameObject:
         return self.__initial_location
 
     def __str__(self):
-        return f'{self.specific_type} with id of {self.universal_id} initialized at tick {self.__initial_tick}'
+        return f'Game Object: {self.specific_type} with id of {self.universal_id} initialized at tick {self.__initial_tick}'
 
     @property
     def snapshot_tick(self):
@@ -104,7 +108,7 @@ class GameObject:
     @property
     def universal_id(self):
         if self.code_type == 'structure':
-            return f'{self.structure_type}-{self.starting_location.room.js_room_name}-{self.starting_location.room_x}-{self.starting_location.room_y}'
+            return f'{self.structure_type}-{self.starting_location.room.js_room_name}-{self.starting_location.js_x}-{self.starting_location.js_y}'
         elif self.code_type == 'source':
             return f'{self.js_id}'
         elif self.code_type == 'creep':
@@ -241,10 +245,13 @@ class Store:
 
         return contents
 
-    def test_reservation(self, tick, test_reservation):
+    def test_reservation(self, test_reservation):
 
         # initialize good reservation and see if it fails a test
         good_reservation = True
+
+        # get tick out of reservation
+        tick = test_reservation['tick']
 
         # init contents to beginning
         contents = self.__initial_used_capacity.copy()
@@ -292,7 +299,7 @@ class Spawn(GameObject):
         # TODO: calc a more realistic spawn point
         return self.world.point(x=self.starting_location.x, y=self.starting_location.y + 1)
 
-    def spawn_creep(self, body, tick):
+    def spawn_creep(self, body, spawn_start_tick):
 
         # init spawned bool
         spawned_creep = None
@@ -300,26 +307,26 @@ class Spawn(GameObject):
         # create variables associated with creep spawn
         reservation = {
             'amount': creep_body_resource_cost(body) * -1,
-            'tick': tick,
+            'tick': spawn_start_tick,
             'resource_type': 'energy'
         }
-        number_of_ticks = creep_body_resource_cost(body)
+        number_of_ticks = creep_body_spawn_time(body)
 
         # check if the spawn is busy
-        if not self.busy(tick=tick, number_of_ticks=number_of_ticks):
+        if not self.busy(tick=spawn_start_tick, number_of_ticks=number_of_ticks):
 
             # check if it has enough energy
-            if self.store.test_reservation(reservation):
+            if self.store.test_reservation(test_reservation=reservation):
 
                 # assign reservation for energy
-                if tick not in self.store.reservations:
-                    self.store.reservations[tick] = []
-                self.store.reservations[tick].append(reservation)
+                if spawn_start_tick not in self.store.reservations:
+                    self.store.reservations[spawn_start_tick] = []
+                self.store.reservations[spawn_start_tick].append(reservation)
 
                 # assign actions for creep creation
                 task = {
                     'received': False,
-                    'tick': tick,
+                    'tick': spawn_start_tick,
                     'assigned_to': self.universal_id,
                     'type': 'spawnCreep',
                     'desired_return_value': 0,
@@ -331,21 +338,21 @@ class Spawn(GameObject):
                 self.add_task(task)
 
                 # create creep json object
-                spawn_pt = self.spawn_pt
+                spawn_pt = self.spawn_point
                 creep_json = {
                     'name': task['details']['name'],
                     'detailed_body': [{'type': body_part, 'hits': 100, 'boost': None} for body_part in body],
                     'code_type': 'creep',
-                    'pos': {'room_name': spawn_pt.js_room_name, 'x': spawn_pt.room_x, 'y': spawn_pt.room_y}
+                    'pos': {'room_name': spawn_pt.room.js_room_name, 'x': spawn_pt.js_x, 'y': spawn_pt.js_y}
                 }
 
                 # create creep
-                spawned_creep = Creep(snapshot_json=creep_json, tick=tick, world=self.world, player=self.player)
+                spawned_creep = Creep(game_object_json=creep_json, tick=spawn_start_tick, world=self.world, player=self.player)
 
                 # TODO: add creep to the objects
 
                 # assign wait options for length of build
-                for loop_tick in range(tick + 1, tick + number_of_ticks):
+                for loop_tick in range((spawn_start_tick + 1), (spawn_start_tick + number_of_ticks)):
                     task = {
                         'received': False,
                         'tick': loop_tick,
@@ -354,9 +361,10 @@ class Spawn(GameObject):
                         'desired_return_value': 99,
                         'details': {}
                     }
-            self.add_task(task)
+                    self.add_task(task)
 
             # return status
+            self.world.game_objects[spawned_creep.universal_id] = spawned_creep
 
         return spawned_creep
 
@@ -376,7 +384,5 @@ class Source(GameObject):
     @property
     def harvest_location(self):
         # TODO: search for storage near it first, otherwise pick where storage should go
-        print(f'path from {self.starting_location} and path to {self.kingdom_flag.starting_location}')
-        path_to_flag = self.starting_location.path_to(to_point=self.kingdom_flag.starting_location)
-        print(f'returned path is {path_to_flag}')
+        path_to_flag = self.starting_location.path_to(to_point=self.kingdom_flag.starting_location, include_static_objects=True, ignore_terrain_differences=True)
         return path_to_flag[1]
