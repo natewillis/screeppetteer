@@ -9,7 +9,7 @@ if __name__ == '__main__':
 
     # setup logging
     logging.basicConfig(filename='./logs/screepy.log', format='%(asctime)s\(%(levelname)s\): %(message)s',
-                        level=logging.DEBUG)
+                        level=logging.DEBUG, filemode='w')
 
     # initialize the world
     world = World('local_server.config')
@@ -18,7 +18,7 @@ if __name__ == '__main__':
     director = Director(world=world, config_file_location='local_server.config')
 
     # initalize players
-    director.add_player(Player(config_file_location='local_server.config', world=world))
+    director.add_player(Player(config_file_location='local_server.config', world=world, director=director))
 
     # test cycle
     director.direct_single_turn()

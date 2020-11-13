@@ -34,7 +34,7 @@ class Point:
         return self.x, self.y
 
     def range(self, point):
-        return max((self.x-point.x), (self.y-point.y))
+        return max(abs(self.x-point.x), abs(self.y-point.y))
 
     @property
     def room(self):
@@ -115,7 +115,7 @@ class Point:
         elif d_x == 1 and d_y == -1:
             return constants.BOTTOM_RIGHT
         else:
-            print(f'{self} to {to_point} is dx{d_x} and dy{d_y}')
+            logger.info(f'{self} to {to_point} is dx{d_x} and dy{d_y}')
             return None
 
 
@@ -374,7 +374,7 @@ class World:
             max_y = num_rows - 1
 
             # create a point for each location on map
-            print('init networkx graph')
+            logger.info('init networkx graph')
             for x in range(0, num_cols):
                 for y in range(0, num_rows):
                     start_point = Point(x=x, y=y, world=self)
@@ -417,7 +417,7 @@ class World:
                 pickle.dump(self.networkx_graph, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     def path_between(self, from_point, to_point, bad_pts=[], include_static_objects=True, ignore_terrain_differences=False):
-        print(f'finding a path between {from_point} to {to_point}')
+        logger.info(f'finding a path between {from_point.js_x_y} to {to_point.js_x_y}')
         # find path with just terrain
         start_grid = self.terrain.terrain_matrix.copy()
 
@@ -443,56 +443,102 @@ class World:
             return start_grid[from_tuple[1], from_tuple[0]]
 
         path = nx.astar_path(G=self.networkx_graph, source=from_point.node, target=to_point.node, weight=weight_func)
-        print(path)
         return path
 
-    def path_for_body_at_time(self, from_point, to_point, start_tick, body, start_fatigue=0):
+    def path_for_body_at_time(self, from_point, to_point, start_tick, body, start_fatigue=0, radius=0, path_finding_object=None):
+
+        # check if we're already there
+        if from_point.range(to_point) <= radius:
+            return [from_point], [start_tick]
+
+        # calc body fatigue stats
+        fatigue_per_move = len([body_part for body_part in body if body_part != 'move'])
+        fatigue_recovery_per_tick = body.count('move') * 2
 
         # get start path
-        start_path = self.path_between(from_point, to_point)
+        dumb_path = self.path_between(from_point, to_point)
+        logger.info(dumb_path)
+
+        # define initial parameters
         actual_path = [from_point]
         actual_path_ticks = [start_tick]
         bad_pts = []
         current_index = 1
         current_tick = start_tick
-        current_move_from_point = self.point(x=start_path[current_index-1][1], y=start_path[current_index-1][0])
-        current_move_to_point = self.point(x=start_path[current_index][1], y=start_path[current_index][0])
+        current_fatigue = start_fatigue
+        current_move_from_point = self.point(x=dumb_path[current_index-1][0], y=dumb_path[current_index-1][1])
+        current_move_to_point = self.point(x=dumb_path[current_index][0], y=dumb_path[current_index][1])
 
         # loop through each point
-        while current_move_from_point.node != to_point.node:
+        max_loops = 1000
+        num_loops = 0
 
-            # deal with fatigue calcs
-            while start_fatigue > 0:
-                current_tick += 1
-                start_fatigue -= min(body.count('move') * 2, start_fatigue)
+        # deal with initial fatigue calculations
+        while current_fatigue > 0:
+            current_tick += 1
+            current_fatigue -= min(fatigue_recovery_per_tick, current_fatigue)
+
+        while num_loops <= max_loops:
+
+            # increment num_loops
+            num_loops += 1
 
             # search for obstacles in the next spot to move
             has_obstacle = False
-            for game_object in self.game_objects:
-                if not game_object.static_object:
-                    if not game_object.passable:
-                        if game_object.location(current_tick+1).node == current_move_to_point.node:
-                            has_obstacle = True
+            for game_object in self.game_objects.values():
+
+                # cant collide with myself
+                is_me = False
+                if path_finding_object is not None:
+                    if path_finding_object.universal_id == game_object.universal_id:
+                        is_me = True
+
+                if not is_me:
+                    if game_object.alive(current_tick+1):
+                        if not game_object.static_object:
+                            if not game_object.passable:
+                                if game_object.location(current_tick+1).node == current_move_to_point.node:
+                                    logger.info(f'{game_object.specific_type} {game_object.universal_id} is in the way!')
+                                    has_obstacle = True
 
             # we can move!
             if not has_obstacle:
+
+                # we're going to move, so advance the tick and work on fatigue
+                current_tick += 1
+                current_fatigue += int(current_move_to_point.terrain) * fatigue_per_move
+                current_fatigue -= min(fatigue_recovery_per_tick, current_fatigue)
+
+                # append the new locaiton and tick to the return
                 actual_path.append(current_move_to_point)
                 actual_path_ticks.append(current_tick)
-                current_index += 1
-                current_move_from_point = self.point(x=start_path[current_index - 1][1], y=start_path[current_index - 1][0])
-                current_move_to_point = self.point(x=start_path[current_index][1], y=start_path[current_index][0])
-                start_fatigue += int(current_move_to_point.terrain)*len(body)
-                bad_pts = []
+
+                # see if we need to move again
+                logger.info(f'we moved and now were {actual_path[-1].range(to_point)} away ({actual_path[-1].js_x_y}) to ({to_point.js_x_y})')
+                if actual_path[-1].range(to_point) > radius:
+                    current_index += 1
+                    current_move_from_point = self.point(x=dumb_path[current_index - 1][0], y=dumb_path[current_index - 1][1])
+                    current_move_to_point = self.point(x=dumb_path[current_index][0], y=dumb_path[current_index][1])
+                    bad_pts = []
+                else:
+                    # we made it, stop looping!
+                    break
             # something is in our way, replan!
             else:
+                logger.info(f'theres an obstacle at {current_move_to_point.js_x_y}!')
                 bad_pts.append(current_move_to_point)
-                start_path = self.path_between(current_move_from_point, to_point, off_limit_pts=bad_pts)
+                logger.info(f'bad pts is now {bad_pts}')
+                dumb_path = self.path_between(current_move_from_point, to_point, bad_pts=bad_pts)
                 current_index = 1
-                current_move_from_point = self.point(x=start_path[current_index - 1][1], y=start_path[current_index - 1][0])
-                current_move_to_point = self.point(x=start_path[current_index][1], y=start_path[current_index][0])
+                current_move_from_point = self.point(x=dumb_path[current_index - 1][0], y=dumb_path[current_index - 1][1])
+                current_move_to_point = self.point(x=dumb_path[current_index][0], y=dumb_path[current_index][1])
+
+            # deal with fatigue calculations
+            while current_fatigue > 0:
+                current_tick += 1
+                current_fatigue -= min(fatigue_recovery_per_tick, current_fatigue)
 
         # we made it through!
-        print(f'path {actual_path} which took {current_tick - start_tick} ticks to travel {len(actual_path)}')
         return actual_path, actual_path_ticks
 
 

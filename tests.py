@@ -4,6 +4,7 @@ import director
 import player
 import game_objects
 import pickle
+import constants
 
 # logging
 import logging
@@ -43,6 +44,14 @@ class TestPointMethods(unittest.TestCase):
         self.assertEqual(point.edge_type, 'E')
         self.assertEqual(point.terrain, 255.4)
 
+    def testPath1(self):
+        from_point = self.world.point(snapshot_json={'room_name': 'W2N2', 'x': 22, 'y': 18})
+        to_point = self.world.point(snapshot_json={'room_name': 'W2N2', 'x': 9, 'y': 24})
+        (path, path_ticks) = self.world.path_for_body_at_time(from_point=from_point, to_point=to_point, body=constants.BASIC_UTILITY_CREEP, start_tick=1)
+        print(path)
+        print(path_ticks)
+        self.assertEqual(path_ticks, 1)
+
 
 # game object methods
 class TestGameObjectMethods(unittest.TestCase):
@@ -61,7 +70,7 @@ class TestGameObjectMethods(unittest.TestCase):
         self.director = director.Director(world=world, config_file_location='test_server.config')
 
         # initalize players
-        self.director.add_player(player.Player(config_file_location='test_server.config', world=world))
+        self.director.add_player(player.Player(config_file_location='test_server.config', world=world, director=self.director))
 
     def testSpawn(self):
         snapshot_json = self.saved_snapshots['basic_start_test']
